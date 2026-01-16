@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>LFASM IDE v2.9.1 - NEG Support</title>
+    <style>
+        :root { --bg: #0d0d0f; --panel: #16161d; --accent: #00ffcc; --warn: #ff3366; --text: #e0e0e0; --highlight: rgba(0, 255, 204, 0.3); }
+        body { font-family: 'Fira Code', monospace; background: var(--bg); color: var(--text); padding: 20px; margin: 0; display: flex; justify-content: center; overflow: hidden;}
+        .ide-container { display: grid; grid-template-columns: 320px 1fr 320px; grid-template-rows: auto 1fr auto; gap: 15px; width: 98vw; height: 95vh; }
+        .panel { background: var(--panel); border: 1px solid #333; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; overflow: hidden; }
+        h3 { margin: 0 0 10px 0; color: var(--accent); font-size: 0.8rem; letter-spacing: 1px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+        .editor-wrapper { position: relative; flex-grow: 1; background: #050505; border-radius: 4px; border: 1px solid #333; overflow: hidden; }
+        #editor { width: 100%; height: 100%; background: transparent; color: #aaffaa; border: none; padding: 10px; font-size: 16px; line-height: 24px; font-family: inherit; resize: none; outline: none; white-space: pre; position: relative; z-index: 2; overflow-y: scroll; box-sizing: border-box; }
+        #line-highlight { position: absolute; left: 0; width: 100%; height: 24px; background: var(--highlight); border-left: 4px solid var(--accent); z-index: 1; pointer-events: none; }
+        .tape { display: flex; flex-wrap: wrap; gap: 4px; padding: 5px; background: #000; overflow-y: auto; border-radius: 4px; flex-grow: 1; }
+        .cell { width: 45px; height: 45px; background: #222; border: 1px solid #444; display: flex; align-items: center; justify-content: center; position: relative; }
+        .cell.active { border-color: var(--accent); background: #0a2e28; box-shadow: inset 0 0 5px var(--accent); }
+        .cell-idx { position: absolute; top: 1px; left: 2px; font-size: 8px; color: #666; }
+        .toolbar { grid-column: 1 / 4; display: flex; gap: 10px; background: var(--panel); padding: 10px; border-radius: 8px; border: 1px solid #333; flex-wrap: wrap; }
+        .btn { padding: 8px 12px; font-weight: bold; cursor: pointer; border: none; border-radius: 4px; font-family: inherit; font-size: 10px; transition: 0.2s; }
+        .manual-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+        .btn-m { background: #222; color: #eee; border: 1px solid #333; padding: 10px; }
+        .btn-m:hover { background: #333; border-color: var(--accent); }
+        .btn-stack { background: #444; color: #fff; }
+        .btn-logic { background: #224; color: #fff; }
+        .btn-math { background: #422; color: #fff; }
+        .console { background: #000; color: #00ff00; flex-grow: 1; padding: 10px; font-size: 0.85rem; overflow-y: auto; border-radius: 4px; border: 1px solid #333; }
+        .stack-list { display: flex; flex-direction: column-reverse; gap: 3px; overflow-y: auto; flex-grow: 1; }
+        .stack-item { background: #1a1a1f; padding: 5px; text-align: center; border: 1px solid #333; color: var(--accent); }
+    </style>
+</head>
+<body onload="loadSystem()">
+
+<div class="ide-container">
+    <div class="toolbar">
+        <button class="btn" style="background:var(--accent); color:#000;" onclick="autoRun(30)">▶ RUN</button>
+        <button class="btn" style="background:#ffaa00; color:#000;" onclick="autoTurbo()">⚡ TURBO</button>
+        <button class="btn" style="background:#333; color:#fff;" onclick="prevStep()">⬅ PREV</button>
+        <button class="btn" style="background:#333; color:#fff;" onclick="step()">➡ STEP</button>
+        <button class="btn" style="background:var(--warn); color:#fff;" onclick="halt()">⏸ HALT</button>
+        <button class="btn" style="background:#555; color:#fff;" onclick="resetAll()">↺ RESET</button>
+        <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+            <input type="color" id="color-accent" value="#00ffcc" onchange="updateTheme()">
+            <input type="number" id="tray-size" value="30" onchange="resizeTray()" style="width:45px; background: #000; color:#fff; border:1px solid #444">
+            <span id="status" style="color:var(--accent); font-size:0.8rem; width: 60px;">READY</span>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3>MANUAL SUITE</h3>
+        <div class="manual-grid">
+            <button class="btn btn-m" onclick="manualOp('IDXINC', 1)">IDXINC</button>
+            <button class="btn btn-m" onclick="manualOp('IDXDEC', 1)">IDXDEC</button>
+            <button class="btn btn-m" onclick="manualOp('INC', 1)">INC</button>
+            <button class="btn btn-m" onclick="manualOp('DEC', 1)">DEC</button>
+            <button class="btn btn-m" onclick="manualOp('OUT(CHAR)')">OUT(CH)</button>
+            <button class="btn btn-m" onclick="manualOp('OUT(NUM)')">OUT(NM)</button>
+            <button class="btn btn-m btn-stack" onclick="manualOp('PUSH')">PUSH</button>
+            <button class="btn btn-m btn-stack" onclick="manualOp('PUSH', 'ZZ')">PUSH ZZ</button>
+            <button class="btn btn-m btn-stack" onclick="manualOp('POP')">POP</button>
+            <button class="btn btn-m btn-stack" onclick="manualOp('POP', 'ZZ')">POP ZZ</button>
+            <button class="btn btn-m btn-logic" onclick="manualOp('CMP')">CMP</button>
+            <button class="btn btn-m btn-logic" onclick="manualOp('DUP')">DUP</button>
+            <button class="btn btn-m btn-math" onclick="manualOp('SUB')">SUB</button>
+            <button class="btn btn-m btn-math" onclick="manualOp('ADD')">ADD</button>
+            <button class="btn btn-m btn-math" onclick="manualOp('MUL')">MUL</button>
+            <button class="btn btn-m btn-math" onclick="manualOp('DIV')">DIV</button>
+            <button class="btn" style="background:var(--warn); color:#fff; grid-column: span 2; padding: 12px; margin-top:5px;" onclick="undo()">⤺ UNDO MANUAL</button>
+        </div>
+        <h3>STACK</h3>
+        <div class="stack-list" id="stack-view"></div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div class="panel" style="flex-grow: 0; max-height: 200px;">
+            <h3>MEMORY TRAY</h3>
+            <div class="tape" id="tape"></div>
+        </div>
+        <div class="editor-wrapper">
+            <div id="line-highlight"></div>
+            <textarea id="editor" spellcheck="false" wrap="off" onscroll="syncHighlight()" oninput="validateCode()">// v2.9.1 NEG Support Enabled
+// Example: Loop if NOT zero
+INC, 5
+PUSH
+STARTLOOP, NEG, EQ, 0
+  OUT(CHAR), "Stack is NOT 0\n"
+  POP
+  INC, 0 // Set to zero
+  PUSH
+ENDLOOP</textarea>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3>CONSOLE</h3>
+        <div class="console" id="console-out"></div>
+    </div>
+</div>
+
+<script>
+    let traySize = 30, tray = new Array(30).fill(0), pointer = 0, stack = [], pc = 0, program = [], jumpMap = {}, loopCounters = {}, isRunning = false, history = [];
+    let charBuffer = [], hasPromptedInput = false;
+    
+    const opcodes = { "IDXINC":1, "IDXDEC":2, "INC":3, "DEC":4, "IN(CHAR)":5, "ZZ":6, "IN(NUM)":7, "OUT(CHAR)":8, "OUT(NUM)":9, "NEG":10, "STARTLOOP":11, "ENDLOOP":12, "EQ":13, "BRK":14, "WHILE":15, "ENDWHILE":16, "PUSH":17, "POP":18, "CMP":19, "DUP":20, "SUB":21, "ADD":22, "MUL":23, "DIV":24, "END":25 };
+
+    function pushHistory() { history.push(JSON.stringify({ tray: [...tray], pointer, stack: [...stack], pc, loopCounters: {...loopCounters}, charBuffer: [...charBuffer], hasPromptedInput, console: document.getElementById('console-out').innerText })); if(history.length > 150) history.shift(); }
+    function applyState(s) { tray = s.tray; pointer = s.pointer; stack = s.stack; pc = s.pc; loopCounters = s.loopCounters; charBuffer = s.charBuffer; hasPromptedInput = s.hasPromptedInput; document.getElementById('console-out').innerText = s.console; render(); syncHighlight(); }
+    function undo() { if(history.length > 0) applyState(JSON.parse(history.pop())); }
+
+    function saveSystem() { localStorage.setItem('lfasm_v291', JSON.stringify({ code: document.getElementById('editor').value, accent: document.getElementById('color-accent').value, traySize: document.getElementById('tray-size').value })); }
+    function loadSystem() { 
+        const s = JSON.parse(localStorage.getItem('lfasm_v291') || '{}');
+        if(s.code) document.getElementById('editor').value = s.code;
+        if(s.accent) document.getElementById('color-accent').value = s.accent;
+        if(s.traySize) document.getElementById('tray-size').value = s.traySize;
+        updateTheme(); resizeTray(); validateCode(); render();
+    }
+
+    function updateTheme() { document.documentElement.style.setProperty('--accent', document.getElementById('color-accent').value); document.documentElement.style.setProperty('--highlight', document.getElementById('color-accent').value + '4D'); saveSystem(); }
+    function resizeTray() { traySize = parseInt(document.getElementById('tray-size').value) || 30; tray = new Array(traySize).fill(0); render(); }
+    function syncHighlight() { 
+        const ed = document.getElementById('editor'), hl = document.getElementById('line-highlight'); 
+        if(program[pc]) { 
+            const topPos = (program[pc].lineIdx * 24) + 10 - ed.scrollTop;
+            hl.style.top = topPos + "px";
+            hl.style.display = (topPos < 0 || topPos > ed.clientHeight - 20) ? "none" : "block";
+        } else hl.style.display="none"; 
+    }
+
+    function validateCode() {
+        const lines = document.getElementById('editor').value.split('\n');
+        program = lines.map((l, i) => {
+            let clean = l.split('//')[0].trim();
+            if(!clean) return { op: null, params: [], lineIdx: i };
+            const p = clean.match(/(".*?"|[^,]+)/g).map(x => x.trim());
+            return { op: opcodes[p[0].toUpperCase()], params: p.slice(1), lineIdx: i };
+        });
+        jumpMap = {}; let blocks = [];
+        program.forEach((p, i) => {
+            if(p.op === 11 || p.op === 15) blocks.push(i);
+            if(p.op === 12 || p.op === 16) { let s = blocks.pop(); if(s!==undefined){ jumpMap[s]=i; jumpMap[i]=s; } }
+        });
+        saveSystem(); syncHighlight();
+    }
+
+    function evaluateParam(tokens) {
+        let res = 0; 
+        let isEq = tokens.some(t => t.toUpperCase() === "EQ");
+        let isNeg = tokens.some(t => t.toUpperCase() === "NEG");
+        
+        for (let i = tokens.length - 1; i >= 0; i--) {
+            let t = tokens[i]?.trim().toUpperCase();
+            if (!t || t === "NEG") continue;
+            
+            if (t === "ZZ") {
+                res = isNeg ? 1 : 0; 
+            } else if (!isNaN(t)) {
+                res = parseInt(t);
+                if (isNeg) res = -res;
+            } else if (t === "EQ") { 
+                let top = (stack.length > 0) ? stack[stack.length-1] : -999999; 
+                let match = (top === res);
+                res = (isNeg ? !match : match) ? 1 : -1; 
+            }
+        }
+        return { val: res, isEq: isEq };
+    }
+
+    function executeOp(inst) {
+        if(!inst || inst.op === null) return;
+        if(inst.op === 8 && inst.params[0]?.startsWith('"')) { document.getElementById('console-out').innerText += inst.params[0].replace(/"/g, '').replace(/\\n/g, '\n'); return; }
+        
+        let pResult = evaluateParam(inst.params);
+        let val = pResult.val;
+        let isZZ = inst.params.some(p => p.toUpperCase() === "ZZ");
+
+        switch(inst.op) {
+            case 1: pointer = (pointer + val) % traySize; break;
+            case 2: pointer = (pointer - val + traySize) % traySize; break;
+            case 3: tray[pointer] += val; break;
+            case 4: tray[pointer] -= val; break;
+            case 5:
+                if (!hasPromptedInput) {
+                    let input = prompt("Enter input string:");
+                    if (input !== null) { charBuffer = input.split('').map(c => c.charCodeAt(0)); }
+                    hasPromptedInput = true;
+                }
+                tray[pointer] = charBuffer.length > 0 ? charBuffer.shift() : 0;
+                break;
+            case 7: let ni = prompt("Input Number:"); tray[pointer] = parseInt(ni) || 0; break;
+            case 8: document.getElementById('console-out').innerText += String.fromCharCode(tray[pointer]); break;
+            case 9: document.getElementById('console-out').innerText += tray[pointer]; break;
+            case 11: 
+                if (pResult.isEq) { 
+                    if (val === 1) loopCounters[pc] = 1; 
+                    else { delete loopCounters[pc]; pc = jumpMap[pc]; } 
+                } else { 
+                    if (val <= 0) { delete loopCounters[pc]; pc = jumpMap[pc]; }
+                    else loopCounters[pc] = val; 
+                }
+                break;
+            case 12: let s = jumpMap[pc]; if(loopCounters[s] > 1) { loopCounters[s]--; pc = s; } else delete loopCounters[s]; break;
+            case 14: 
+                let searchPC = pc;
+                while(searchPC < program.length) {
+                    if(program[searchPC].op === 16) { pc = searchPC; break; }
+                    searchPC++;
+                }
+                break;
+            case 15: if (val !== 1) pc = jumpMap[pc]; break;
+            case 16: pc = jumpMap[pc] - 1; break;
+            case 17: stack.push(tray[pointer]); if(!isZZ) tray[pointer] = 0; break;
+            case 18: if(stack.length) { tray[pointer] = isZZ ? stack[stack.length-1] : stack.pop(); } break;
+            case 19: if(stack.length >= 2) { let t = stack.pop(), s = stack.pop(); stack.push(t < s ? 0 : (t > s ? 1 : 2)); } break;
+            case 20: if(stack.length) stack.push(stack[stack.length-1]); break;
+            case 21: if(stack.length >= 2) { let t = stack.pop(), s = stack.pop(); stack.push(s - t); } break;
+            case 22: if(stack.length >= 2) stack.push(stack.pop() + stack.pop()); break;
+            case 23: if(stack.length >= 2) stack.push(stack.pop() * stack.pop()); break;
+            case 24: if(stack.length >= 2) { let t = stack.pop(), s = stack.pop(); stack.push(t === 0 ? 1 : Math.floor(s/t)); } break;
+            case 25: halt(); break;
+        }
+    }
+
+    function step() { if(pc >= program.length) return false; pushHistory(); executeOp(program[pc]); pc++; render(); syncHighlight(); return true; }
+    function halt() { isRunning = false; document.getElementById('status').innerText = "HALTED"; }
+    function resetAll() { halt(); tray.fill(0); pointer=0; stack=[]; pc=0; loopCounters={}; history=[]; charBuffer=[]; hasPromptedInput=false; document.getElementById('console-out').innerText=""; render(); }
+    async function autoRun(ms) { isRunning=true; while(isRunning && pc < program.length){ if(!step()) break; await new Promise(r=>setTimeout(r,ms)); } }
+    function autoTurbo() { isRunning=true; function rb(){ if(!isRunning || pc>=program.length) return; for(let i=0;i<2000;i++){ executeOp(program[pc]); pc++; if(pc>=program.length) break; } render(); syncHighlight(); requestAnimationFrame(rb); } rb(); }
+    function manualOp(c, p="") { pushHistory(); executeOp({op: opcodes[c], params: p ? [p.toString()] : []}); render(); }
+    function render() {
+        document.getElementById('tape').innerHTML = tray.map((v, i) => `<div class="cell ${i===pointer?'active':''}"><span class="cell-idx">${i}</span><span class="cell-val">${v}</span></div>`).join('');
+        document.getElementById('stack-view').innerHTML = stack.map(v => `<div class="stack-item">${v}</div>`).join('');
+    }
+</script>
+</body>
+</html>
