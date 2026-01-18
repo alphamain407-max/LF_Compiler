@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>LFASM IDE v2.9.1 - NEG Support</title>
+    <title>LFASM IDE v2.9.5 - Optimized Turbo</title>
     <style>
         :root { --bg: #0d0d0f; --panel: #16161d; --accent: #00ffcc; --warn: #ff3366; --text: #e0e0e0; --highlight: rgba(0, 255, 204, 0.3); }
         body { font-family: 'Fira Code', monospace; background: var(--bg); color: var(--text); padding: 20px; margin: 0; display: flex; justify-content: center; overflow: hidden;}
@@ -78,16 +78,7 @@
         </div>
         <div class="editor-wrapper">
             <div id="line-highlight"></div>
-            <textarea id="editor" spellcheck="false" wrap="off" onscroll="syncHighlight()" oninput="validateCode()">// v2.9.1 NEG Support Enabled
-// Example: Loop if NOT zero
-INC, 5
-PUSH
-STARTLOOP, NEG, EQ, 0
-  OUT(CHAR), "Stack is NOT 0\n"
-  POP
-  INC, 0 // Set to zero
-  PUSH
-ENDLOOP</textarea>
+            <textarea id="editor" spellcheck="false" wrap="off" onscroll="syncHighlight()" oninput="validateCode()">// v2.9.5 Optimized Turbo</textarea>
         </div>
     </div>
 
@@ -107,9 +98,9 @@ ENDLOOP</textarea>
     function applyState(s) { tray = s.tray; pointer = s.pointer; stack = s.stack; pc = s.pc; loopCounters = s.loopCounters; charBuffer = s.charBuffer; hasPromptedInput = s.hasPromptedInput; document.getElementById('console-out').innerText = s.console; render(); syncHighlight(); }
     function undo() { if(history.length > 0) applyState(JSON.parse(history.pop())); }
 
-    function saveSystem() { localStorage.setItem('lfasm_v291', JSON.stringify({ code: document.getElementById('editor').value, accent: document.getElementById('color-accent').value, traySize: document.getElementById('tray-size').value })); }
+    function saveSystem() { localStorage.setItem('lfasm_v295', JSON.stringify({ code: document.getElementById('editor').value, accent: document.getElementById('color-accent').value, traySize: document.getElementById('tray-size').value })); }
     function loadSystem() { 
-        const s = JSON.parse(localStorage.getItem('lfasm_v291') || '{}');
+        const s = JSON.parse(localStorage.getItem('lfasm_v295') || '{}');
         if(s.code) document.getElementById('editor').value = s.code;
         if(s.accent) document.getElementById('color-accent').value = s.accent;
         if(s.traySize) document.getElementById('tray-size').value = s.traySize;
@@ -147,17 +138,12 @@ ENDLOOP</textarea>
         let res = 0; 
         let isEq = tokens.some(t => t.toUpperCase() === "EQ");
         let isNeg = tokens.some(t => t.toUpperCase() === "NEG");
-        
         for (let i = tokens.length - 1; i >= 0; i--) {
             let t = tokens[i]?.trim().toUpperCase();
             if (!t || t === "NEG") continue;
-            
-            if (t === "ZZ") {
-                res = isNeg ? 1 : 0; 
-            } else if (!isNaN(t)) {
-                res = parseInt(t);
-                if (isNeg) res = -res;
-            } else if (t === "EQ") { 
+            if (t === "ZZ") res = isNeg ? 1 : 0; 
+            else if (!isNaN(t)) { res = parseInt(t); if (isNeg) res = -res; }
+            else if (t === "EQ") { 
                 let top = (stack.length > 0) ? stack[stack.length-1] : -999999; 
                 let match = (top === res);
                 res = (isNeg ? !match : match) ? 1 : -1; 
@@ -168,12 +154,14 @@ ENDLOOP</textarea>
 
     function executeOp(inst) {
         if(!inst || inst.op === null) return;
-        if(inst.op === 8 && inst.params[0]?.startsWith('"')) { document.getElementById('console-out').innerText += inst.params[0].replace(/"/g, '').replace(/\\n/g, '\n'); return; }
-        
+        if(inst.op === 8 && inst.params[0]?.startsWith('"')) { 
+            let str = inst.params[0].substring(1, inst.params[0].length - 1);
+            document.getElementById('console-out').innerText += str.replace(/\\n/g, '\n'); 
+            return; 
+        }
         let pResult = evaluateParam(inst.params);
         let val = pResult.val;
         let isZZ = inst.params.some(p => p.toUpperCase() === "ZZ");
-
         switch(inst.op) {
             case 1: pointer = (pointer + val) % traySize; break;
             case 2: pointer = (pointer - val + traySize) % traySize; break;
@@ -201,9 +189,10 @@ ENDLOOP</textarea>
                 break;
             case 12: let s = jumpMap[pc]; if(loopCounters[s] > 1) { loopCounters[s]--; pc = s; } else delete loopCounters[s]; break;
             case 14: 
-                let searchPC = pc;
+                let skipCount = (inst.params.length > 0 && !isNaN(inst.params[0])) ? parseInt(inst.params[0]) : 1;
+                let foundCount = 0; let searchPC = pc;
                 while(searchPC < program.length) {
-                    if(program[searchPC].op === 16) { pc = searchPC; break; }
+                    if(program[searchPC].op === 16) { foundCount++; if(foundCount === skipCount) { pc = searchPC; break; } }
                     searchPC++;
                 }
                 break;
@@ -221,11 +210,32 @@ ENDLOOP</textarea>
         }
     }
 
-    function step() { if(pc >= program.length) return false; pushHistory(); executeOp(program[pc]); pc++; render(); syncHighlight(); return true; }
+    function step() { if(pc >= program.length || !isRunning) return false; pushHistory(); executeOp(program[pc]); pc++; render(); syncHighlight(); return true; }
     function halt() { isRunning = false; document.getElementById('status').innerText = "HALTED"; }
-    function resetAll() { halt(); tray.fill(0); pointer=0; stack=[]; pc=0; loopCounters={}; history=[]; charBuffer=[]; hasPromptedInput=false; document.getElementById('console-out').innerText=""; render(); }
-    async function autoRun(ms) { isRunning=true; while(isRunning && pc < program.length){ if(!step()) break; await new Promise(r=>setTimeout(r,ms)); } }
-    function autoTurbo() { isRunning=true; function rb(){ if(!isRunning || pc>=program.length) return; for(let i=0;i<2000;i++){ executeOp(program[pc]); pc++; if(pc>=program.length) break; } render(); syncHighlight(); requestAnimationFrame(rb); } rb(); }
+    function resetAll() { halt(); tray.fill(0); pointer=0; stack=[]; pc=0; loopCounters={}; history=[]; charBuffer=[]; hasPromptedInput=false; document.getElementById('console-out').innerText=""; render(); document.getElementById('status').innerText = "READY"; }
+    async function autoRun(ms) { isRunning=true; document.getElementById('status').innerText = "RUNNING"; while(isRunning && pc < program.length){ if(!step()) break; await new Promise(r=>setTimeout(r,ms)); } }
+    
+    // Highly Optimized Turbo Logic
+    function autoTurbo() { 
+        isRunning=true; 
+        document.getElementById('status').innerText = "TURBO";
+        function rb(){ 
+            if(!isRunning || pc >= program.length) return; 
+            // 50,000 instructions per frame for high throughput
+            for(let i=0; i<50000; i++){ 
+                executeOp(program[pc]); 
+                pc++; 
+                if(pc >= program.length || !isRunning) break; 
+            } 
+            // Refresh UI once per frame instead of per instruction
+            render(); 
+            syncHighlight(); 
+            if(isRunning && pc < program.length) requestAnimationFrame(rb); 
+            else if (pc >= program.length) document.getElementById('status').innerText = "DONE";
+        } 
+        rb(); 
+    }
+    
     function manualOp(c, p="") { pushHistory(); executeOp({op: opcodes[c], params: p ? [p.toString()] : []}); render(); }
     function render() {
         document.getElementById('tape').innerHTML = tray.map((v, i) => `<div class="cell ${i===pointer?'active':''}"><span class="cell-idx">${i}</span><span class="cell-val">${v}</span></div>`).join('');
