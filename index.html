@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>LFASM IDE v2.9.5 - Optimized Turbo</title>
+    <title>LFASM IDE v2.9.7 - Debugger Fix</title>
     <style>
         :root { --bg: #0d0d0f; --panel: #16161d; --accent: #00ffcc; --warn: #ff3366; --text: #e0e0e0; --highlight: rgba(0, 255, 204, 0.3); }
         body { font-family: 'Fira Code', monospace; background: var(--bg); color: var(--text); padding: 20px; margin: 0; display: flex; justify-content: center; overflow: hidden;}
@@ -41,7 +41,10 @@
         <button class="btn" style="background:#555; color:#fff;" onclick="resetAll()">↺ RESET</button>
         <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
             <input type="color" id="color-accent" value="#00ffcc" onchange="updateTheme()">
+            <label style="font-size:0.7rem;">TRAY:</label>
             <input type="number" id="tray-size" value="30" onchange="resizeTray()" style="width:45px; background: #000; color:#fff; border:1px solid #444">
+            <label style="font-size:0.7rem;">STACK CAP:</label>
+            <input type="number" id="stack-cap" value="100" onchange="saveSystem()" style="width:45px; background: #000; color:#fff; border:1px solid #444">
             <span id="status" style="color:var(--accent); font-size:0.8rem; width: 60px;">READY</span>
         </div>
     </div>
@@ -78,7 +81,12 @@
         </div>
         <div class="editor-wrapper">
             <div id="line-highlight"></div>
-            <textarea id="editor" spellcheck="false" wrap="off" onscroll="syncHighlight()" oninput="validateCode()">// v2.9.5 Optimized Turbo</textarea>
+            <textarea id="editor" spellcheck="false" wrap="off" onscroll="syncHighlight()" oninput="validateCode()">// v2.9.7 Fixed Debugging
+OUT(CHAR), "Testing Step..."
+INC, 1
+OUT(NUM)
+INC, 1
+OUT(NUM)</textarea>
         </div>
     </div>
 
@@ -94,16 +102,17 @@
     
     const opcodes = { "IDXINC":1, "IDXDEC":2, "INC":3, "DEC":4, "IN(CHAR)":5, "ZZ":6, "IN(NUM)":7, "OUT(CHAR)":8, "OUT(NUM)":9, "NEG":10, "STARTLOOP":11, "ENDLOOP":12, "EQ":13, "BRK":14, "WHILE":15, "ENDWHILE":16, "PUSH":17, "POP":18, "CMP":19, "DUP":20, "SUB":21, "ADD":22, "MUL":23, "DIV":24, "END":25 };
 
-    function pushHistory() { history.push(JSON.stringify({ tray: [...tray], pointer, stack: [...stack], pc, loopCounters: {...loopCounters}, charBuffer: [...charBuffer], hasPromptedInput, console: document.getElementById('console-out').innerText })); if(history.length > 150) history.shift(); }
+    function pushHistory() { history.push(JSON.stringify({ tray: [...tray], pointer, stack: [...stack], pc, loopCounters: {...loopCounters}, charBuffer: [...charBuffer], hasPromptedInput, console: document.getElementById('console-out').innerText })); if(history.length > 500) history.shift(); }
     function applyState(s) { tray = s.tray; pointer = s.pointer; stack = s.stack; pc = s.pc; loopCounters = s.loopCounters; charBuffer = s.charBuffer; hasPromptedInput = s.hasPromptedInput; document.getElementById('console-out').innerText = s.console; render(); syncHighlight(); }
     function undo() { if(history.length > 0) applyState(JSON.parse(history.pop())); }
 
-    function saveSystem() { localStorage.setItem('lfasm_v295', JSON.stringify({ code: document.getElementById('editor').value, accent: document.getElementById('color-accent').value, traySize: document.getElementById('tray-size').value })); }
+    function saveSystem() { localStorage.setItem('lfasm_v297', JSON.stringify({ code: document.getElementById('editor').value, accent: document.getElementById('color-accent').value, traySize: document.getElementById('tray-size').value, stackCap: document.getElementById('stack-cap').value })); }
     function loadSystem() { 
-        const s = JSON.parse(localStorage.getItem('lfasm_v295') || '{}');
+        const s = JSON.parse(localStorage.getItem('lfasm_v297') || '{}');
         if(s.code) document.getElementById('editor').value = s.code;
         if(s.accent) document.getElementById('color-accent').value = s.accent;
         if(s.traySize) document.getElementById('tray-size').value = s.traySize;
+        if(s.stackCap) document.getElementById('stack-cap').value = s.stackCap;
         updateTheme(); resizeTray(); validateCode(); render();
     }
 
@@ -152,6 +161,12 @@
         return { val: res, isEq: isEq };
     }
 
+    function pushToStack(val) {
+        const cap = parseInt(document.getElementById('stack-cap').value) || 100;
+        stack.push(val);
+        while(stack.length > cap) { stack.shift(); }
+    }
+
     function executeOp(inst) {
         if(!inst || inst.op === null) return;
         if(inst.op === 8 && inst.params[0]?.startsWith('"')) { 
@@ -198,38 +213,58 @@
                 break;
             case 15: if (val !== 1) pc = jumpMap[pc]; break;
             case 16: pc = jumpMap[pc] - 1; break;
-            case 17: stack.push(tray[pointer]); if(!isZZ) tray[pointer] = 0; break;
+            case 17: pushToStack(tray[pointer]); if(!isZZ) tray[pointer] = 0; break;
             case 18: if(stack.length) { tray[pointer] = isZZ ? stack[stack.length-1] : stack.pop(); } break;
-            case 19: if(stack.length >= 2) { let t = stack.pop(), s = stack.pop(); stack.push(t < s ? 0 : (t > s ? 1 : 2)); } break;
-            case 20: if(stack.length) stack.push(stack[stack.length-1]); break;
-            case 21: if(stack.length >= 2) { let t = stack.pop(), s = stack.pop(); stack.push(s - t); } break;
-            case 22: if(stack.length >= 2) stack.push(stack.pop() + stack.pop()); break;
-            case 23: if(stack.length >= 2) stack.push(stack.pop() * stack.pop()); break;
-            case 24: if(stack.length >= 2) { let t = stack.pop(), s = stack.pop(); stack.push(t === 0 ? 1 : Math.floor(s/t)); } break;
+            case 19: if(stack.length >= 2) { let t = stack.pop(), s = stack.pop(); pushToStack(t < s ? 0 : (t > s ? 1 : 2)); } break;
+            case 20: if(stack.length) pushToStack(stack[stack.length-1]); break;
+            case 21: if(stack.length >= 2) { let t = stack.pop(), s = stack.pop(); pushToStack(s - t); } break;
+            case 22: if(stack.length >= 2) pushToStack(stack.pop() + stack.pop()); break;
+            case 23: if(stack.length >= 2) pushToStack(stack.pop() * stack.pop()); break;
+            case 24: if(stack.length >= 2) { let t = stack.pop(), s = stack.pop(); pushToStack(t === 0 ? 1 : Math.floor(s/t)); } break;
             case 25: halt(); break;
         }
     }
 
-    function step() { if(pc >= program.length || !isRunning) return false; pushHistory(); executeOp(program[pc]); pc++; render(); syncHighlight(); return true; }
+    function step() { 
+        if(pc >= program.length) return false; 
+        document.getElementById('status').innerText = "STEPPING";
+        pushHistory(); 
+        executeOp(program[pc]); 
+        pc++; 
+        render(); 
+        syncHighlight(); 
+        return true; 
+    }
+    
+    function prevStep() { 
+        if(history.length === 0) return;
+        undo();
+        document.getElementById('status').innerText = "REVERSED";
+    }
+
     function halt() { isRunning = false; document.getElementById('status').innerText = "HALTED"; }
     function resetAll() { halt(); tray.fill(0); pointer=0; stack=[]; pc=0; loopCounters={}; history=[]; charBuffer=[]; hasPromptedInput=false; document.getElementById('console-out').innerText=""; render(); document.getElementById('status').innerText = "READY"; }
-    async function autoRun(ms) { isRunning=true; document.getElementById('status').innerText = "RUNNING"; while(isRunning && pc < program.length){ if(!step()) break; await new Promise(r=>setTimeout(r,ms)); } }
     
-    // Highly Optimized Turbo Logic
+    async function autoRun(ms) { 
+        isRunning=true; 
+        document.getElementById('status').innerText = "RUNNING"; 
+        while(isRunning && pc < program.length){ 
+            if(!step()) break; 
+            await new Promise(r=>setTimeout(r,ms)); 
+        } 
+    }
+    
     function autoTurbo() { 
         isRunning=true; 
         document.getElementById('status').innerText = "TURBO";
         function rb(){ 
             if(!isRunning || pc >= program.length) return; 
-            // 50,000 instructions per frame for high throughput
             for(let i=0; i<50000; i++){ 
                 executeOp(program[pc]); 
                 pc++; 
                 if(pc >= program.length || !isRunning) break; 
             } 
-            // Refresh UI once per frame instead of per instruction
-            render(); 
-            syncHighlight(); 
+            render(); syncHighlight(); 
             if(isRunning && pc < program.length) requestAnimationFrame(rb); 
             else if (pc >= program.length) document.getElementById('status').innerText = "DONE";
         } 
@@ -237,6 +272,7 @@
     }
     
     function manualOp(c, p="") { pushHistory(); executeOp({op: opcodes[c], params: p ? [p.toString()] : []}); render(); }
+    
     function render() {
         document.getElementById('tape').innerHTML = tray.map((v, i) => `<div class="cell ${i===pointer?'active':''}"><span class="cell-idx">${i}</span><span class="cell-val">${v}</span></div>`).join('');
         document.getElementById('stack-view').innerHTML = stack.map(v => `<div class="stack-item">${v}</div>`).join('');
